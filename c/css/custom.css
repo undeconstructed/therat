@@ -1,0 +1,87 @@
+
+body {
+  background: #333;
+}
+
+#app {
+}
+
+.app {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  padding: 10px;
+  overflow: hidden;
+
+  display: grid;
+  grid-template-columns: 1fr 15em;
+  column-gap: 10px;
+}
+  .main {
+    display: grid;
+    grid-template-rows: 5em 1fr 2em;
+    grid-template-columns: 1fr;
+    row-gap: 2px;
+    overflow-y: auto;
+  }
+    .title {
+      background: white;
+      padding: 1em;
+    }
+    .lines {
+      background: white;
+      overflow-y: scroll;
+      padding: 1em;
+    }
+      .line {
+        margin: 1em 0;
+        border: 1px solid gray;
+        padding: 1em;
+        opacity: 25%;
+      }
+      .line.done {
+        opacity: 50%;
+      }
+      .line.active {
+        padding: 5em 1em;
+        background: white;
+        opacity: 100%;
+      }
+      .line.todo {
+        /* display: none; */
+      }
+      .line .content {
+      }
+    .transport {
+      background: white;
+      display: flex;
+      justify-content: center;
+    }
+  .side {
+    display: grid;
+    grid-template-rows: 2fr 1fr;
+    row-gap: 10px;
+    overflow-y: auto;
+  }
+    .peoplelist {
+      background: white;
+    }
+    .peoplelist ul {
+      list-style: none;
+      padding: 0;
+    }
+    .xxx {
+      background: white;
+    }
+
+aside {
+  overflow-y: auto;
+}
+aside > header {
+  text-align: center;
+  padding: 5px;
+  border-bottom: 1px solid gray;
+}
+aside > div {
+  overflow-y: auto;
+  padding: 5px;
+}
