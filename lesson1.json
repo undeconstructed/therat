@@ -1,0 +1,13 @@
+{
+  "title": "lesson one",
+  "lines": [{
+    "text": "line 1"
+  }, {
+    "text": "line 2"
+  }],
+  "people": [{
+    "name": "host"
+  }, {
+    "name": "user"
+  }]
+}

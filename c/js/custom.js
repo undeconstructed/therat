@@ -1,9 +1,11 @@
 'use strict';
 
+const other = Symbol('default')
+
 function switchy (arg, opts) {
   let o = opts[arg]
   if (!o) {
-    o = opts['default']
+    o = opts[other]
   }
   if (!o) {
     throw new Error('switchy: unhandled ' + arg)
@@ -47,7 +49,7 @@ const Line = ({text, state}) => {
   </div>
 }
 
-const Page = ({data, at}) => {
+const Page = ({title, lines, at}) => {
   function renderLines(lines, at) {
     let out = []
     for (let n in lines) {
@@ -65,8 +67,8 @@ const Page = ({data, at}) => {
   }
 
   return <React.Fragment>
-    <header className="title"><MyTitle text={data.title()} /></header>
-    <div className="lines">{renderLines(data.list(), at)}</div>
+    <header className="title"><MyTitle text={title} /></header>
+    <div className="lines">{renderLines(lines, at)}</div>
   </React.Fragment>
 }
 
@@ -81,21 +83,23 @@ const TransportControls = React.memo(({back, next}) => {
   </div>
 })
 
-function sortPeople(a, b) {
-  return a.id > b.id
+function getPeople(sync) {
+  let raw = sync.get('people') || []
+  let list = [...raw].sort((a, b) => a.name > b.name)
+  return list
 }
 
-const PeopleList = ({people}) => {
-  const [list, setList] = React.useState(people.list().sort(sortPeople))
+const PeopleList = ({sync}) => {
+  const [list, setList] = React.useState(() => getPeople(sync))
 
   const onChange = React.useCallback(() => {
-    let l = people.list().sort(sortPeople)
-    setList(l)
+    console.log('people update')
+    setList(getPeople(sync))
   }, [])
 
   React.useEffect(() => {
-    people.watch(onChange)
-    return () => people.unwatch(onChange)
+    let stop = sync.watch('people', onChange)
+    return stop
   }, [])
 
   return <aside className="peoplelist">
@@ -109,20 +113,19 @@ const PeopleList = ({people}) => {
 }
 
 const StatusDisplay = ({sync}) => {
-  const [online, setOnline] = React.useState(sync.online)
+  const [online, setOnline] = React.useState(sync.isOnline())
 
   const onChange = React.useCallback((type) => {
-    console.log('sync update')
+    console.log('status update')
     setOnline(sync.online)
   }, [])
 
   React.useEffect(() => {
-    console.log('watch sync')
-    sync.watch(onChange)
-    return () => sync.unwatch(onChange)
+    let stop = sync.watch('online', onChange)
+    return stop
   }, [])
 
-  return <aside className="xxx">
+  return <aside className="status">
     <header>status</header>
     <div>{online ? "online" : "offline"}</div>
   </aside>
@@ -143,24 +146,36 @@ const AppCo = ({sync, data, people}) => {
           0)
         return { ...s, at: n }
       },
-      'default': () => ({ ...s })
+      'set': () => {
+        if (a.title) {
+          s = { ...s, title: a.title }
+        }
+        if (a.lines) {
+          s = { ...s, lines: a.lines }
+        }
+        return s
+      },
+      [other]: () => ({ ...s })
     })
-  }, { at: 0 })
+  }, { title: 'loading', lines: [], at: 0 })
 
-  const onChange = React.useCallback(() => {
-    update({ is: null })
+  const onChangeTitle = React.useCallback(() => {
+    update({ is: 'set', title: sync.get('title') })
+  }, [])
+  const onChangeLines = React.useCallback(() => {
+    update({ is: 'set',  lines: sync.get('lines') })
   }, [])
 
   React.useEffect(() => {
-    data.watch(onChange)
-    return () => data.unwatch(onChange)
+    let stop1 = sync.watch('title', onChangeTitle)
+    let stop2 = sync.watch('lines', onChangeLines)
+    return () => { stop1(); stop2() }
   }, [])
 
   const back = React.useCallback((e) => {
     e.preventDefault()
     update({ is: 'back' })
   }, [])
-
   const next = React.useCallback((e) => {
     e.preventDefault()
     update({ is: 'next' })
@@ -179,103 +194,29 @@ const AppCo = ({sync, data, people}) => {
 
   return <div className="app">
     <div className="main">
-      <Page data={data} at={state.at} />
+      <Page title={sync.get('title')} lines={sync.get('lines')} at={state.at} />
       <TransportControls back={back} next={next} />
     </div>
     <div className="side">
-      <PeopleList people={people}/>
+      <PeopleList sync={sync}/>
       <StatusDisplay sync={sync}/>
     </div>
   </div>
-}
-
-class PeopleSync {
-  constructor() {
-    // this.people = Array(5).fill().map(() => ({ id: randomNumber(1, 1000)}))
-    this.people = []
-    this.watchers = []
-  }
-  start(people, sync) {
-    this.people = people.map(e => ({ id: e.name, name: e.name, online: e.online }))
-    this._notify()
-    sync.watch(e => this._onEvent)
-  }
-  _onEvent(type, e) {
-  }
-  // *[Symbol.iterator]() {
-  //   for (let e of this.people) {
-  //     yield 'foo'
-  //   }
-  // }
-  list() {
-    return [...this.people]
-  }
-  watch(s) {
-    this.watchers.push(s)
-  }
-  unwatch(s) {
-    let n = this.watchers.indexOf(s)
-    if (n >= 0) {
-      this.watchers.splice(n, n)
-    }
-  }
-  _notify() {
-    for (let s of this.watchers) {
-      setTimeout(() => {
-        s()
-      }, 0)
-    }
-  }
-}
-
-class DataSync {
-  constructor() {
-    this.data = {
-      title: 'none',
-      lines: []
-    }
-    this.watchers = []
-  }
-  start(data, sync) {
-    this.data = data
-    this._notify()
-    sync.watch(e => this.onEvent)
-  }
-  onEvent(e) {
-  }
-  title() {
-    return this.data.title
-  }
-  list() {
-    return [...this.data.lines]
-  }
-  length() {
-    return this.data.lines.length
-  }
-  watch(s) {
-    this.watchers.push(s)
-  }
-  unwatch(s) {
-    let n = this.watchers.indexOf(s)
-    if (n >= 0) {
-      this.watchers.splice(n, n)
-    }
-  }
-  _notify() {
-    for (let s of this.watchers) {
-      setTimeout(() => {
-        s()
-      }, 0)
-    }
-  }
 }
 
 class Sync {
   constructor() {
     this.watchers = []
     this.online = false
+    this.data = {}
   }
-  start(token) {
+  start(token, data) {
+    this.data = data
+
+    for (let k in data) {
+      this._notify(k)
+    }
+
     let url = 'ws://' + document.location.host + '/s/sync?token=' + token
     let ws = new WebSocket(url)
     ws.onopen = (evt) => {
@@ -289,27 +230,50 @@ class Sync {
       this.ws = null
     }
     ws.onmessage = (evt) => {
-      console.log('sync message: ' + evt.data)
+      let m = JSON.parse(evt.data)
+      switchy(m.type, {
+        's': () => {
+          alert('message: ' + m.message)
+        },
+        'u': () => {
+          console.log('update: ' + m.path)
+          // XXX
+          this.data[m.path] = m.data
+          this._notify(m.path)
+        },
+        [other]: () => {
+          console.log('message? ' + m)
+        }
+      })
     }
     ws.onerror = (evt) => {
       console.log('sync error: ' + evt.data)
     }
     this.ws = ws
   }
-  watch(s) {
-    this.watchers.push(s)
+  isOnline() {
+    return this.online
   }
-  unwatch(s) {
-    let n = this.watchers.indexOf(s)
+  get(path) {
+    return this.data[path]
+  }
+  watch(path, callback) {
+    this.watchers.push({ path, callback })
+    return () => this.unwatch(path, callback)
+  }
+  unwatch(path, callback) {
+    let n = this.watchers.find(e => e.path == path && e.callback == callback)
     if (n >= 0) {
       this.watchers.splice(n, n)
     }
   }
-  _notify(type, e) {
-    for (let s of this.watchers) {
-      setTimeout(() => {
-        s(type, e)
-      }, 0)
+  _notify(path, event) {
+    for (let watcher of this.watchers) {
+      if (watcher.path == path) {
+        // setTimeout(() => {
+          watcher.callback(path, event)
+        // }, 0)
+      }
     }
   }
 }
@@ -321,8 +285,6 @@ class App {
     this.token = null
 
     this.sync = new Sync()
-    this.people = new PeopleSync()
-    this.data = new DataSync()
   }
 
   run() {
@@ -345,12 +307,11 @@ class App {
   }
 
   _onData(d) {
-    this.people.start(d.users, this.sync)
-    this.data.start({
+    this.sync.start(this.token, {
+      people: d.users,
       title: d.title,
       lines: d.lines,
-    }, this.sync)
-    this.sync.start(this.token)
+    })
   }
 }
 
