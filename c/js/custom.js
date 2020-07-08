@@ -137,14 +137,16 @@ const AppCo = ({sync, data, people}) => {
       'next': () => {
         let n = Math.min(
           s.at + 1,
-          data.length() - 1)
-        return { ...s, at: n }
+          s.lines.length - 1)
+        sync.set('at', n)
+        return s // { ...s, at: n }
       },
       'back': () => {
         let n = Math.max(
           s.at - 1,
           0)
-        return { ...s, at: n }
+        sync.set('at', n)
+        return s // { ...s, at: n }
       },
       'set': () => {
         if (a.title) {
@@ -152,6 +154,9 @@ const AppCo = ({sync, data, people}) => {
         }
         if (a.lines) {
           s = { ...s, lines: a.lines }
+        }
+        if (a.at !== undefined) {
+          s = { ...s, at: a.at }
         }
         return s
       },
@@ -165,11 +170,15 @@ const AppCo = ({sync, data, people}) => {
   const onChangeLines = React.useCallback(() => {
     update({ is: 'set',  lines: sync.get('lines') })
   }, [])
+  const onChangeAt = React.useCallback(() => {
+    update({ is: 'set', at: sync.get('at') })
+  }, [])
 
   React.useEffect(() => {
     let stop1 = sync.watch('title', onChangeTitle)
     let stop2 = sync.watch('lines', onChangeLines)
-    return () => { stop1(); stop2() }
+    let stop3 = sync.watch('at', onChangeAt)
+    return () => { stop1(); stop2(); stop3(); }
   }, [])
 
   const back = React.useCallback((e) => {
@@ -194,7 +203,7 @@ const AppCo = ({sync, data, people}) => {
 
   return <div className="app">
     <div className="main">
-      <Page title={sync.get('title')} lines={sync.get('lines')} at={state.at} />
+      <Page title={state.title} lines={state.lines} at={state.at} />
       <TransportControls back={back} next={next} />
     </div>
     <div className="side">
@@ -236,10 +245,7 @@ class Sync {
           alert('message: ' + m.message)
         },
         'u': () => {
-          console.log('update: ' + m.path)
-          // XXX
-          this.data[m.path] = m.data
-          this._notify(m.path)
+          this._update(m.path, m.data)
         },
         [other]: () => {
           console.log('message? ' + m)
@@ -251,11 +257,25 @@ class Sync {
     }
     this.ws = ws
   }
+  _update(path, value) {
+    console.log('update', path)
+    // XXX
+    this.data[path] = value
+    this._notify(path)
+  }
   isOnline() {
     return this.online
   }
   get(path) {
     return this.data[path]
+  }
+  set(path, value) {
+    let data = JSON.stringify({
+      type: 'u',
+      path: path,
+      value: value
+    })
+    this.ws.send(data)
   }
   watch(path, callback) {
     this.watchers.push({ path, callback })
@@ -271,7 +291,11 @@ class Sync {
     for (let watcher of this.watchers) {
       if (watcher.path == path) {
         // setTimeout(() => {
+        try {
           watcher.callback(path, event)
+        } catch (e) {
+          console.log('notify error!', e)
+        }
         // }, 0)
       }
     }

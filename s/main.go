@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go l.run()
+	go l.Run()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/c/", 301)
@@ -46,7 +46,7 @@ func main() {
 	http.HandleFunc("/s/login", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		n := q.Get("name")
-		t, err := l.login(n)
+		t, err := l.Login(n)
 		if err != nil {
 			w.WriteHeader(401)
 			w.Write([]byte(err.Error()))
@@ -54,7 +54,9 @@ func main() {
 		}
 
 		w.WriteHeader(200)
-		j, _ := json.Marshal(loginResponse{t})
+		j, _ := json.Marshal(struct {
+			Token string `json:"token"`
+		}{t})
 		w.Write(j)
 	})
 
@@ -68,8 +70,9 @@ func main() {
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(200)
-		j, _ := json.Marshal(l)
-		w.Write(j)
+
+		b, _ := l.JSON()
+		w.Write(b)
 	})
 
 	http.HandleFunc("/s/events", func(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +102,13 @@ func main() {
 		}
 		defer c.Close()
 
-		client, err := l.connect(token, c)
+		run, err := l.Connect(token, c)
 		if err != nil {
-			w.WriteHeader(400)
+			// w.WriteHeader(400)
 			return
 		}
 
-		client.run()
+		run()
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, nil))
