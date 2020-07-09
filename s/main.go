@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 
@@ -16,7 +17,16 @@ var addr = flag.String("addr", "localhost:8080", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
 
+// JSONLoginResponse is for sending to the client
+type JSONLoginResponse struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+	Host  bool   `json:"host"`
+}
+
 func main() {
+	log.Printf("running %s", os.Args[0])
+
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -25,6 +35,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	state, _ := l.JSON()
+	log.Printf("state: %s", state)
 
 	go l.Run()
 
@@ -45,8 +58,8 @@ func main() {
 
 	http.HandleFunc("/s/login", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		n := q.Get("name")
-		t, err := l.Login(n)
+		a := q.Get("auth")
+		res, err := l.Login(a)
 		if err != nil {
 			w.WriteHeader(401)
 			w.Write([]byte(err.Error()))
@@ -54,9 +67,7 @@ func main() {
 		}
 
 		w.WriteHeader(200)
-		j, _ := json.Marshal(struct {
-			Token string `json:"token"`
-		}{t})
+		j, _ := json.Marshal(JSONLoginResponse{res.token, res.name, res.host})
 		w.Write(j)
 	})
 
@@ -94,6 +105,7 @@ func main() {
 			w.WriteHeader(401)
 			return
 		}
+		// TODO - get from param
 
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {

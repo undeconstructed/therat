@@ -5,9 +5,28 @@ import (
 	"io/ioutil"
 )
 
-func newLesson(title string) *Sync {
-	s := newSync()
-	s.title = title
+type line struct {
+	Text string `json:"text"`
+}
+
+type lessonFile struct {
+	Title string    `json:"title"`
+	Lines []line    `json:"lines"`
+	Users []UserDef `json:"users"`
+}
+
+type lessonData struct {
+	Title string `json:"title"`
+	Lines []line `json:"lines"`
+	At    int    `json:"at"`
+}
+
+func newLesson(users []UserDef, title string, lines []line) *Sync {
+	s := newSync(users, lessonData{
+		Title: title,
+		Lines: lines,
+		At:    0,
+	})
 	return s
 }
 
@@ -23,29 +42,7 @@ func loadLesson(filename string) (*Sync, error) {
 		return nil, err
 	}
 
-	l := newLesson(file.Title)
-
-	for _, inline := range file.Lines {
-		l.lines = append(l.lines, line{
-			Text: inline.Text,
-		})
-	}
-
-	for _, inuser := range file.Users {
-		l.users = append(l.users, &user{
-			Name: inuser.Name,
-		})
-	}
+	l := newLesson(file.Users, file.Title, file.Lines)
 
 	return l, nil
-}
-
-type lessonFile struct {
-	Title string `json:"title"`
-	Lines []struct {
-		Text string `json:"text"`
-	} `json:"lines"`
-	Users []struct {
-		Name string `json:"name"`
-	} `json:"people"`
 }

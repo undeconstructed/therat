@@ -11,10 +11,14 @@ body {
   top: 0; right: 0; bottom: 0; left: 0;
   padding: 10px;
   overflow: hidden;
-
   display: grid;
-  grid-template-columns: 1fr 15em;
   column-gap: 10px;
+}
+.app.ashost {
+  grid-template-columns: 1fr 15em;
+}
+.app.asuser {
+  grid-template-columns: 1fr;
 }
   .main {
     display: grid;
@@ -56,16 +60,21 @@ body {
       display: flex;
       justify-content: center;
     }
+    .statusline {
+      background: white;
+      display: flex;
+      justify-content: center;
+    }
   .side {
     display: grid;
     grid-template-rows: 2fr 1fr;
     row-gap: 10px;
     overflow-y: auto;
   }
-    .peoplelist {
+    .userslist {
       background: white;
     }
-    .peoplelist ul {
+    .userslist ul {
       list-style: none;
       padding: 0;
     }

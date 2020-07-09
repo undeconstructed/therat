@@ -9,12 +9,14 @@ import (
 )
 
 type loginRequest struct {
-	name string
+	auth string
 	res  chan loginResponse
 }
 
 type loginResponse struct {
 	token string
+	name  string
+	host  bool
 	err   error
 }
 
@@ -53,10 +55,6 @@ func (u *user) MarshalJSON() ([]byte, error) {
 	})
 }
 
-type line struct {
-	Text string `json:"text"`
-}
-
 // box could be for storing typed data?
 type box struct {
 	Type  string         `json:"type"`
@@ -67,9 +65,7 @@ type box struct {
 type Sync struct {
 	version int
 	// TODO generic data
-	title string
-	lines []line
-	at    int
+	data lessonData
 
 	updatesIn  chan updateRequest
 	updatesOut chan updateMessage
@@ -80,33 +76,35 @@ type Sync struct {
 	users       []*user
 }
 
-func newSync() *Sync {
+func newSync(users []UserDef, data lessonData) *Sync {
+	users1 := []*user{}
+	for _, u := range users {
+		u1 := &user{
+			Name: u.Name,
+		}
+		users1 = append(users1, u1)
+	}
+
 	return &Sync{
 		version:     0,
-		title:       "title",
-		lines:       []line{},
-		at:          0,
+		users:       users1,
+		data:        data,
 		updatesIn:   make(chan updateRequest, 100),
 		updatesOut:  make(chan updateMessage, 100),
 		logins:      make(chan loginRequest),
 		connects:    make(chan connectRequest),
 		disconnects: make(chan disconnectRequest),
-		users:       []*user{},
 	}
-}
-
-type syncJSON struct {
-	Version int     `json:"version"`
-	Title   string  `json:"title"`
-	Lines   []line  `json:"lines"`
-	At      int     `json:"at"`
-	Users   []*user `json:"users"`
 }
 
 // JSON encodes all sync data to JSON
 func (s *Sync) JSON() ([]byte, error) {
 	// XXX - locking
-	return json.Marshal(syncJSON{s.version, s.title, s.lines, s.at, s.users})
+	return json.Marshal(struct {
+		Version int        `json:"version"`
+		Users   []*user    `json:"users"`
+		Data    lessonData `json:"data"`
+	}{s.version, s.users, s.data})
 }
 
 // Run is the main loop for the Sync
@@ -114,7 +112,7 @@ func (s *Sync) Run() {
 	for {
 		select {
 		case m := <-s.logins:
-			res := s.doLogin(m.name)
+			res := s.doLogin(m.auth)
 			m.res <- res
 		case m := <-s.connects:
 			res := s.doConnect(m.token, m.conn)
@@ -137,9 +135,9 @@ func (s *Sync) Update(path string, data interface{}) {
 func (s *Sync) doUpdate(path string, data interface{}) {
 	if path == "at" {
 		s.version++
-		s.at = data.(int)
-		jn, _ := json.Marshal(s.at)
-		s.updatesOut <- updateMessage{s.version, "at", jn}
+		s.data.At = data.(int)
+		jn, _ := json.Marshal(s.data.At)
+		s.updatesOut <- updateMessage{s.version, "data/at", jn}
 	}
 }
 
@@ -156,22 +154,26 @@ func (s *Sync) sendUpdates(m updateMessage) {
 }
 
 // Login gets a token to allow connecting to the Sync
-func (s *Sync) Login(name string) (string, error) {
+func (s *Sync) Login(name string) (loginResponse, error) {
 	resCh := make(chan loginResponse)
 	s.logins <- loginRequest{name, resCh}
 	res := <-resCh
-	return res.token, res.err
+	return res, res.err
 }
 
-func (s *Sync) doLogin(name string) loginResponse {
+func (s *Sync) doLogin(auth string) loginResponse {
 	for _, u := range s.users {
-		if u.Name == name {
-			s.version++
-			return loginResponse{name, nil}
+		// XXX - auth shouldn't be name maybe
+		if u.Name == auth {
+			// XXX - token shouldn't be name maybe
+			token := u.Name
+			name := u.Name
+			host := u.Name == "host"
+			return loginResponse{token, name, host, nil}
 		}
 	}
 
-	return loginResponse{"", errors.New("no user")}
+	return loginResponse{"", "", false, errors.New("no user")}
 }
 
 // Connect allows a websocket to connect to the Sync. Run the returned func in the web handler.
@@ -197,7 +199,7 @@ func (s *Sync) doConnect(token string, conn *websocket.Conn) connectResponse {
 			jn, _ := json.Marshal(s.users)
 			s.updatesOut <- updateMessage{
 				Version: s.version,
-				Path:    "people",
+				Path:    "users",
 				Data:    jn,
 			}
 
@@ -223,7 +225,7 @@ func (s *Sync) doDisconnect(client *client) {
 			jn, _ := json.Marshal(s.users)
 			s.updatesOut <- updateMessage{
 				Version: s.version,
-				Path:    "people",
+				Path:    "users",
 				Data:    jn,
 			}
 		}
@@ -271,7 +273,7 @@ func (c *client) run() {
 	}
 	egestMessage := func(m interface{}) {
 		j, _ := json.Marshal(m)
-		log.Printf("to user: %s %s", c.user.Name, string(j))
+		// log.Printf("to user: %s %s", c.user.Name, string(j))
 		err := c.conn.WriteMessage(websocket.TextMessage, j)
 		if err != nil {
 			log.Println("write error:", err)

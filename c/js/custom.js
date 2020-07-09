@@ -83,27 +83,24 @@ const TransportControls = React.memo(({back, next}) => {
   </div>
 })
 
-function getPeople(sync) {
-  let raw = sync.get('people') || []
+function getUsers(sync) {
+  let raw = sync.get('users') || []
   let list = [...raw].sort((a, b) => a.name > b.name)
   return list
 }
 
-const PeopleList = ({sync}) => {
-  const [list, setList] = React.useState(() => getPeople(sync))
-
-  const onChange = React.useCallback(() => {
-    console.log('people update')
-    setList(getPeople(sync))
-  }, [])
+const UsersList = ({sync}) => {
+  const [list, setList] = React.useState(() => getUsers(sync))
 
   React.useEffect(() => {
-    let stop = sync.watch('people', onChange)
+    let stop = sync.watch('users', () => {
+      setList(getUsers(sync))
+    })
     return stop
   }, [])
 
-  return <aside className="peoplelist">
-    <header>people</header>
+  return <aside className="userslist">
+    <header>users</header>
     <div>
       <ul>
         {list.map(e => <li key={e.id}>{e.id} ({e.online ? "online" : "offline"})</li>)}
@@ -115,13 +112,10 @@ const PeopleList = ({sync}) => {
 const StatusDisplay = ({sync}) => {
   const [online, setOnline] = React.useState(sync.isOnline())
 
-  const onChange = React.useCallback((type) => {
-    console.log('status update')
-    setOnline(sync.online)
-  }, [])
-
   React.useEffect(() => {
-    let stop = sync.watch('online', onChange)
+    let stop = sync.watch('online', () => {
+      setOnline(sync.online)
+    })
     return stop
   }, [])
 
@@ -131,21 +125,80 @@ const StatusDisplay = ({sync}) => {
   </aside>
 }
 
-const AppCo = ({sync, data, people}) => {
+const StatusLine = ({sync}) => {
+  const [online, setOnline] = React.useState(sync.isOnline())
+
+  React.useEffect(() => {
+    let stop = sync.watch('online', () => {
+      setOnline(sync.online)
+    })
+    return stop
+  }, [])
+
+  return <aside className="statusline">
+    <div>{online ? "online" : "offline"}</div>
+  </aside>
+}
+
+const PreAppScreen = ({text}) => {
+  return <h1>... {text} ...</h1>
+}
+
+const AsUserScreen = ({sync}) => {
+  const [state, update] = React.useReducer((s, a) => {
+    return switchy(a.is, {
+      'set': () => {
+        if (a.title) {
+          s = { ...s, title: a.title }
+        }
+        if (a.lines) {
+          s = { ...s, lines: a.lines }
+        }
+        if (a.at !== undefined) {
+          s = { ...s, at: a.at }
+        }
+        return s
+      },
+      [other]: () => ({ ...s })
+    })
+  }, { title: 'loading', lines: [], at: 0 })
+
+  React.useEffect(() => {
+    let stop1 = sync.watch('data/title', () => {
+      update({ is: 'set', title: sync.get('data/title') })
+    })
+    let stop2 = sync.watch('data/lines', () => {
+      update({ is: 'set',  lines: sync.get('data/lines') })
+    })
+    let stop3 = sync.watch('data/at', () => {
+      update({ is: 'set', at: sync.get('data/at') })
+    })
+    return () => { stop1(); stop2(); stop3(); }
+  }, [])
+
+  return <div className="app asuser">
+    <div className="main">
+      <Page title={state.title} lines={state.lines} at={state.at} />
+      <StatusLine sync={sync}/>
+    </div>
+  </div>
+}
+
+const AsHostScreen = ({sync}) => {
   const [state, update] = React.useReducer((s, a) => {
     return switchy(a.is, {
       'next': () => {
         let n = Math.min(
           s.at + 1,
           s.lines.length - 1)
-        sync.set('at', n)
+        n != s.at && sync.set('at', n)
         return s // { ...s, at: n }
       },
       'back': () => {
         let n = Math.max(
           s.at - 1,
           0)
-        sync.set('at', n)
+        n != s.at && sync.set('at', n)
         return s // { ...s, at: n }
       },
       'set': () => {
@@ -164,28 +217,24 @@ const AppCo = ({sync, data, people}) => {
     })
   }, { title: 'loading', lines: [], at: 0 })
 
-  const onChangeTitle = React.useCallback(() => {
-    update({ is: 'set', title: sync.get('title') })
-  }, [])
-  const onChangeLines = React.useCallback(() => {
-    update({ is: 'set',  lines: sync.get('lines') })
-  }, [])
-  const onChangeAt = React.useCallback(() => {
-    update({ is: 'set', at: sync.get('at') })
-  }, [])
-
   React.useEffect(() => {
-    let stop1 = sync.watch('title', onChangeTitle)
-    let stop2 = sync.watch('lines', onChangeLines)
-    let stop3 = sync.watch('at', onChangeAt)
+    let stop1 = sync.watch('data/title', () => {
+      update({ is: 'set', title: sync.get('data/title') })
+    })
+    let stop2 = sync.watch('data/lines', () => {
+      update({ is: 'set',  lines: sync.get('data/lines') })
+    })
+    let stop3 = sync.watch('data/at', () => {
+      update({ is: 'set', at: sync.get('data/at') })
+    })
     return () => { stop1(); stop2(); stop3(); }
   }, [])
 
-  const back = React.useCallback((e) => {
+  let back = React.useCallback((e) => {
     e.preventDefault()
     update({ is: 'back' })
   }, [])
-  const next = React.useCallback((e) => {
+  let next = React.useCallback((e) => {
     e.preventDefault()
     update({ is: 'next' })
   }, [])
@@ -201,39 +250,47 @@ const AppCo = ({sync, data, people}) => {
     return () => document.removeEventListener('keypress', f)
   }, [])
 
-  return <div className="app">
+  return <div className="app ashost">
     <div className="main">
       <Page title={state.title} lines={state.lines} at={state.at} />
       <TransportControls back={back} next={next} />
     </div>
     <div className="side">
-      <PeopleList sync={sync}/>
+      <UsersList sync={sync}/>
       <StatusDisplay sync={sync}/>
     </div>
   </div>
 }
 
 class Sync {
-  constructor() {
-    this.watchers = []
+  constructor(loginResponse) {
+    this.token = loginResponse.token
+    this.host = loginResponse.host
     this.online = false
-    this.data = {}
-  }
-  start(token, data) {
-    this.data = data
 
-    for (let k in data) {
-      this._notify(k)
+    this.version = 0
+    this.users = []
+    this.data = {}
+
+    this.watchers = []
+  }
+  start(dataResponse) {
+    this.version = dataResponse.version
+    this.users = dataResponse.users
+    this.data = dataResponse.data
+
+    this._notify('users')
+    for (let k in this.data) {
+      this._notify(`data/${k}`)
     }
 
-    let url = 'ws://' + document.location.host + '/s/sync?token=' + token
+    let url = `ws://${document.location.host}/s/sync?token=${this.token}&from=${this.version}`
     let ws = new WebSocket(url)
     ws.onopen = (evt) => {
       this.online = true
       this._notify('online')
     }
     ws.onclose = (evt) => {
-      console.log('CLOSE')
       this.online = false
       this._notify('online')
       this.ws = null
@@ -245,7 +302,7 @@ class Sync {
           alert('message: ' + m.message)
         },
         'u': () => {
-          this._update(m.path, m.data)
+          this._update(m.version, m.path, m.data)
         },
         [other]: () => {
           console.log('message? ' + m)
@@ -257,17 +314,32 @@ class Sync {
     }
     this.ws = ws
   }
-  _update(path, value) {
-    console.log('update', path)
-    // XXX
-    this.data[path] = value
+  _update(version, path, value) {
+    console.log('update arrived', version, path)
+    this.version = version
+    if (path == 'users') {
+      this.users = value
+    } else if (path.startsWith('data/')) {
+      let dpath = path.substring(5)
+      // XXX - actually follow path
+      this.data[dpath] = value
+    }
     this._notify(path)
   }
   isOnline() {
     return this.online
   }
+  isHost() {
+    return this.host
+  }
   get(path) {
-    return this.data[path]
+    if (path == 'users') {
+      return this.users
+    } else if (path.startsWith('data/')) {
+      let dpath = path.substring(5)
+      return this.data[dpath]
+    }
+    return null
   }
   set(path, value) {
     let data = JSON.stringify({
@@ -287,55 +359,62 @@ class Sync {
       this.watchers.splice(n, n)
     }
   }
-  _notify(path, event) {
-    for (let watcher of this.watchers) {
-      if (watcher.path == path) {
-        // setTimeout(() => {
-        try {
-          watcher.callback(path, event)
-        } catch (e) {
-          console.log('notify error!', e)
+  _notify(path) {
+    setTimeout(() => {
+      // console.log('notify?', path)
+      for (let watcher of this.watchers) {
+        if (path.startsWith(watcher.path)) {
+          // console.log('yes!', watcher.path)
+          try {
+            watcher.callback(path)
+          } catch (e) {
+            console.log('notify error!', e)
+          }
+        } else {
+          // console.log('no!', watcher.path)
         }
-        // }, 0)
       }
-    }
+    }, 0)
   }
 }
 
 class App {
   constructor() {
-    console.log(urlParams)
-    this.user = urlParams.user || 'phil'
-    this.token = null
-
-    this.sync = new Sync()
+    this.auth = urlParams.auth
+    this.sync = null
   }
 
   run() {
-    ReactDOM.render(<AppCo sync={this.sync} data={this.data} people={this.people} />, document.querySelector('#app'))
+    ReactDOM.render(React.createElement(PreAppScreen, { text: 'logging in' }), document.querySelector('#app'))
 
-    fetch('/s/login?name=' + this.user)
+    fetch('/s/login?auth=' + this.auth)
       .then(response => response.json())
-      .then(loginResponse => {
-        this.token = loginResponse.token
-        this._onLogin()
-      })
+      .then(r => this._onLogin(r))
   }
 
-  _onLogin() {
+  _onLogin(loginResponse) {
+    ReactDOM.render(React.createElement(PreAppScreen, { text: 'fetching data' }), document.querySelector('#app'))
+
+    this.sync = new Sync(loginResponse)
+
     fetch('/s/data?token=' + this.token)
       .then(response => response.json())
-      .then(dataResponse => {
-        this._onData(dataResponse)
-      })
+      .then(r => this._onData(r))
   }
 
-  _onData(d) {
-    this.sync.start(this.token, {
-      people: d.users,
-      title: d.title,
-      lines: d.lines,
-    })
+  _onData(dataResponse) {
+    if (this.sync.isHost()) {
+      ReactDOM.render(React.createElement(AsHostScreen, { sync: this.sync }), document.querySelector('#app'))
+    } else {
+      ReactDOM.render(React.createElement(AsUserScreen, { sync: this.sync }), document.querySelector('#app'))
+    }
+    this.sync.start(dataResponse)
+  }
+
+  addLine(text) {
+    let lines = [ ...sync.get('data/lines') ]
+    lines.push({ text })
+    sync.update('data/lines', lines)
   }
 }
 

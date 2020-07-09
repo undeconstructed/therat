@@ -2,6 +2,11 @@ package main
 
 import "encoding/json"
 
+// UserDef is for inputting users
+type UserDef struct {
+	Name string `json:"name"`
+}
+
 type clientMessage struct {
 	Message string `json:"message"`
 }
