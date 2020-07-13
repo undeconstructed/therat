@@ -49,38 +49,28 @@ const Line = ({text, state}) => {
   </div>
 }
 
-const Page = ({title, lines, at}) => {
-  function renderLines(lines, at) {
+const Page = ({lines, order, at}) => {
+  function renderLines(lines, order, at) {
     let out = []
-    for (let n in lines) {
-      let line = lines[n]
-      let l = line.text
-      if (n < at) {
-        out.push(<Line key={l} text={l} state="done" />)
-      } else if (n == at) {
-        out.push(<Line key={l} text={l} state="active" />)
-      } else {
-        out.push(<Line key={l} text={l} state="todo" />)
+    let state = "done"
+    for (let ref of order) {
+      if (ref == at) {
+        state = "active"
+      } else if (state == "active") {
+        state = "todo"
       }
+      let line = lines[ref]
+      let l = line.text
+      out.push(<Line key={ref} text={l} state={state} />)
     }
     return out
   }
 
-  return <React.Fragment>
-    <header className="title"><MyTitle text={title} /></header>
-    <div className="lines">{renderLines(lines, at)}</div>
-  </React.Fragment>
+  return <div className="lines">{renderLines(lines, order, at)}</div>
 }
 
 const MyTitle = React.memo(({text}) => {
   return <h1>{text}</h1>
-})
-
-const TransportControls = React.memo(({back, next}) => {
-  return <div className="transport">
-    <a onClick={back}>[back]</a>
-    <a onClick={next}>[next]</a>
-  </div>
 })
 
 function getUsers(sync) {
@@ -145,115 +135,89 @@ const PreAppScreen = ({text}) => {
 }
 
 const AsUserScreen = ({sync}) => {
-  const [state, update] = React.useReducer((s, a) => {
-    return switchy(a.is, {
-      'set': () => {
-        if (a.title) {
-          s = { ...s, title: a.title }
-        }
-        if (a.lines) {
-          s = { ...s, lines: a.lines }
-        }
-        if (a.at !== undefined) {
-          s = { ...s, at: a.at }
-        }
-        return s
-      },
-      [other]: () => ({ ...s })
-    })
-  }, { title: 'loading', lines: [], at: 0 })
+  const [state, update] = React.useReducer(
+    (s, a) => ({ ...s, ...a }),
+    { title: 'loading', lines: {}, order: [], at: '' })
 
   React.useEffect(() => {
-    let stop1 = sync.watch('data/title', () => {
-      update({ is: 'set', title: sync.get('data/title') })
+    return sync.multiwatch({
+      'data/title': () => update({ title: sync.get('data/title') }),
+      'data/lines': () => update({ lines: sync.get('data/lines') }),
+      'data/order': () => update({ order: sync.get('data/order') }),
+      'data/at': () => update({ at: sync.get('data/at') })
     })
-    let stop2 = sync.watch('data/lines', () => {
-      update({ is: 'set',  lines: sync.get('data/lines') })
-    })
-    let stop3 = sync.watch('data/at', () => {
-      update({ is: 'set', at: sync.get('data/at') })
-    })
-    return () => { stop1(); stop2(); stop3(); }
   }, [])
 
   return <div className="app asuser">
     <div className="main">
-      <Page title={state.title} lines={state.lines} at={state.at} />
+      <header className="title"><MyTitle text={state.title} /></header>
+      <Page lines={state.lines} order={state.order} at={state.at} />
       <StatusLine sync={sync}/>
     </div>
   </div>
 }
 
+const TransportControls = React.memo(({back, next}) => {
+  return <div className="transport">
+    <a onClick={back ? back : undefined} className={!back ? 'disabled' : undefined}>[back]</a>
+    <a onClick={next ? next : undefined} className={!next ? 'disabled' : undefined}>[next]</a>
+  </div>
+})
+
 const AsHostScreen = ({sync}) => {
-  const [state, update] = React.useReducer((s, a) => {
+  const [state, signal] = React.useReducer((s, a) => {
     return switchy(a.is, {
+      'move': () => {
+        sync.set('data/at', a.at)
+        return s // { ...s, at: n }
+      },
       'next': () => {
-        let n = Math.min(
-          s.at + 1,
-          s.lines.length - 1)
-        n != s.at && sync.set('at', n)
-        return s // { ...s, at: n }
-      },
-      'back': () => {
-        let n = Math.max(
-          s.at - 1,
-          0)
-        n != s.at && sync.set('at', n)
-        return s // { ...s, at: n }
-      },
-      'set': () => {
-        if (a.title) {
-          s = { ...s, title: a.title }
-        }
-        if (a.lines) {
-          s = { ...s, lines: a.lines }
-        }
-        if (a.at !== undefined) {
-          s = { ...s, at: a.at }
-        }
+        let n = s.order[s.order.indexOf(s.at)+1]
+        n && sync.set('data/at', n)
         return s
       },
+      'set': () => ({ ...s, ...a }),
       [other]: () => ({ ...s })
     })
-  }, { title: 'loading', lines: [], at: 0 })
+  }, { title: 'loading', lines: {}, order: [], at: 0 })
 
   React.useEffect(() => {
-    let stop1 = sync.watch('data/title', () => {
-      update({ is: 'set', title: sync.get('data/title') })
+    return sync.multiwatch({
+      'data/title': () => signal({ is: 'set', title: sync.get('data/title') }),
+      'data/lines': () => signal({ is: 'set', lines: sync.get('data/lines') }),
+      'data/order': () => signal({ is: 'set', order: sync.get('data/order') }),
+      'data/at': () => signal({ is: 'set', at: sync.get('data/at') })
     })
-    let stop2 = sync.watch('data/lines', () => {
-      update({ is: 'set',  lines: sync.get('data/lines') })
-    })
-    let stop3 = sync.watch('data/at', () => {
-      update({ is: 'set', at: sync.get('data/at') })
-    })
-    return () => { stop1(); stop2(); stop3(); }
   }, [])
+
+  let backAt = state.order[state.order.indexOf(state.at)-1]
+  let nextAt = state.order[state.order.indexOf(state.at)+1]
 
   let back = React.useCallback((e) => {
     e.preventDefault()
-    update({ is: 'back' })
-  }, [])
+    signal({ is: 'move', at: backAt })
+  }, [backAt])
   let next = React.useCallback((e) => {
     e.preventDefault()
-    update({ is: 'next' })
-  }, [])
+    signal({ is: 'move', at: nextAt })
+  }, [nextAt])
 
   React.useEffect(() => {
     const f = e => {
       if (e.code == 'Space') {
         e.preventDefault()
-        update({ is: 'next' })
+        signal({ is: 'next' })
       }
     }
     document.addEventListener('keypress', f)
     return () => document.removeEventListener('keypress', f)
-  }, [])
+  }, [next])
 
   return <div className="app ashost">
     <div className="main">
-      <Page title={state.title} lines={state.lines} at={state.at} />
-      <TransportControls back={back} next={next} />
+      <header className="title"><MyTitle text={state.title} /></header>
+      <Page lines={state.lines} order={state.order} at={state.at} />
+      <TransportControls back={backAt && back} next={nextAt && next} />
     </div>
     <div className="side">
       <UsersList sync={sync}/>
@@ -353,6 +317,13 @@ class Sync {
     this.watchers.push({ path, callback })
     return () => this.unwatch(path, callback)
   }
+  multiwatch(watches) {
+    let stops = []
+    for (let p in watches) {
+      this.watch(p, watches[p])
+    }
+    return () => stops.forEach(e => e())
+  }
   unwatch(path, callback) {
     let n = this.watchers.find(e => e.path == path && e.callback == callback)
     if (n >= 0) {
@@ -381,6 +352,7 @@ class Sync {
 class App {
   constructor() {
     this.auth = urlParams.auth
+    this.token = null
     this.sync = null
   }
 
@@ -395,6 +367,7 @@ class App {
   _onLogin(loginResponse) {
     ReactDOM.render(React.createElement(PreAppScreen, { text: 'fetching data' }), document.querySelector('#app'))
 
+    this.token = loginResponse.token
     this.sync = new Sync(loginResponse)
 
     fetch('/s/data?token=' + this.token)
@@ -412,9 +385,9 @@ class App {
   }
 
   addLine(text) {
-    let lines = [ ...sync.get('data/lines') ]
+    let lines = [ ...this.sync.get('data/lines') ]
     lines.push({ text })
-    sync.update('data/lines', lines)
+    this.sync.set('data/lines', lines)
   }
 }
 

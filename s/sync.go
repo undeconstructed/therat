@@ -4,9 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
+
+// SyncData allows the data in the Sync to be handled by something else
+type SyncData interface {
+	Update(path string, data json.RawMessage) (string, error)
+	MarshalJSONPart(path string) ([]byte, error)
+}
 
 type loginRequest struct {
 	auth string
@@ -37,7 +44,7 @@ type disconnectRequest struct {
 
 type updateRequest struct {
 	Path string
-	Data interface{}
+	Data json.RawMessage
 }
 
 type user struct {
@@ -55,17 +62,11 @@ func (u *user) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// box could be for storing typed data?
-type box struct {
-	Type  string         `json:"type"`
-	Value map[string]box `json:"value"`
-}
-
 // Sync handles data sync between some users
 type Sync struct {
 	version int
 	// TODO generic data
-	data lessonData
+	data SyncData
 
 	updatesIn  chan updateRequest
 	updatesOut chan updateMessage
@@ -76,7 +77,7 @@ type Sync struct {
 	users       []*user
 }
 
-func newSync(users []UserDef, data lessonData) *Sync {
+func newSync(users []UserDef, data SyncData) *Sync {
 	users1 := []*user{}
 	for _, u := range users {
 		u1 := &user{
@@ -97,14 +98,18 @@ func newSync(users []UserDef, data lessonData) *Sync {
 	}
 }
 
-// JSON encodes all sync data to JSON
-func (s *Sync) JSON() ([]byte, error) {
-	// XXX - locking
+// MarshalJSON encodes all sync data to JSON
+func (s *Sync) MarshalJSON() ([]byte, error) {
+	dataJSON, err := json.Marshal(s.data)
+	if err != nil {
+		return nil, err
+	}
+
 	return json.Marshal(struct {
-		Version int        `json:"version"`
-		Users   []*user    `json:"users"`
-		Data    lessonData `json:"data"`
-	}{s.version, s.users, s.data})
+		Version int             `json:"version"`
+		Users   []*user         `json:"users"`
+		Data    json.RawMessage `json:"data"`
+	}{s.version, s.users, dataJSON})
 }
 
 // Run is the main loop for the Sync
@@ -128,16 +133,21 @@ func (s *Sync) Run() {
 }
 
 // Update updates the data in the Sync
-func (s *Sync) Update(path string, data interface{}) {
+func (s *Sync) Update(path string, data json.RawMessage) {
 	s.updatesIn <- updateRequest{path, data}
 }
 
-func (s *Sync) doUpdate(path string, data interface{}) {
-	if path == "at" {
+func (s *Sync) doUpdate(path string, data json.RawMessage) {
+	if strings.HasPrefix(path, "data/") {
+		dpath := path[5:]
+		cpath, err := s.data.Update(dpath, data)
+		if err != nil {
+			log.Printf("data rejected: %v", err)
+			return
+		}
 		s.version++
-		s.data.At = data.(int)
-		jn, _ := json.Marshal(s.data.At)
-		s.updatesOut <- updateMessage{s.version, "data/at", jn}
+		jn, _ := s.data.MarshalJSONPart(cpath)
+		s.updatesOut <- updateMessage{s.version, "data/" + cpath, jn}
 	}
 }
 
@@ -252,7 +262,7 @@ func (c *client) run() {
 	toUser := make(chan interface{}, 100)
 	fromUser := make(chan []byte)
 
-	ingestMessage := func(m []byte) {
+	ingestMessage := func(m []byte) error {
 		log.Printf("from user: %s %s", c.user.Name, string(m))
 		v := struct {
 			Type string          `json:"type"`
@@ -261,23 +271,21 @@ func (c *client) run() {
 		}{}
 		err := json.Unmarshal(m, &v)
 		if err != nil {
-			log.Println("read error:", err)
+			return err
 		}
 		if v.Type == "u" {
-			if v.Path == "at" {
-				val := 0
-				json.Unmarshal(v.Data, &val)
-				c.sync.Update(v.Path, val)
-			}
+			c.sync.Update(v.Path, v.Data)
 		}
+		return nil
 	}
-	egestMessage := func(m interface{}) {
+	egestMessage := func(m interface{}) error {
 		j, _ := json.Marshal(m)
 		// log.Printf("to user: %s %s", c.user.Name, string(j))
 		err := c.conn.WriteMessage(websocket.TextMessage, j)
 		if err != nil {
-			log.Println("write error:", err)
+			return err
 		}
+		return nil
 	}
 
 	go func() {
@@ -306,13 +314,19 @@ func (c *client) run() {
 				c.sync.disconnect(c)
 				return
 			}
-			ingestMessage(m)
+			err := ingestMessage(m)
+			if err != nil {
+				log.Printf("error from user: %s, %v", c.user.Name, err)
+			}
 		case m, ok := <-toUser:
 			if !ok {
 				log.Printf("user kicked: %s", c.user.Name)
 				return
 			}
-			egestMessage(m)
+			err := egestMessage(m)
+			if err != nil {
+				log.Printf("error to user: %s, %v", c.user.Name, err)
+			}
 		}
 	}
 }

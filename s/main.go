@@ -36,7 +36,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	state, _ := l.JSON()
+	state, _ := l.MarshalJSON()
 	log.Printf("state: %s", state)
 
 	go l.Run()
@@ -78,11 +78,12 @@ func main() {
 			w.WriteHeader(401)
 			return
 		}
+		// TODO - check token
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(200)
 
-		b, _ := l.JSON()
+		b, _ := l.MarshalJSON()
 		w.Write(b)
 	})
 
