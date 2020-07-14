@@ -39,14 +39,14 @@ body {
       .line {
         margin: 1em 0;
         border: 1px solid gray;
-        padding: 1em;
         opacity: 25%;
+        display: flex;
+        flex-direction: row;
       }
       .line.done {
         opacity: 50%;
       }
       .line.active {
-        padding: 5em 1em;
         background: white;
         opacity: 100%;
       }
@@ -54,6 +54,21 @@ body {
         /* display: none; */
       }
       .line .content {
+        flex-grow: 100;
+        padding: 1em;
+      }
+      .line.active .content {
+        padding: 5em 1em;
+      }
+      .line .actions {
+        flex-grow: 1;
+        padding: 1em;
+        background-color: #eee;
+        padding: 2px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
       }
     .transport {
       background: white;

@@ -35,7 +35,16 @@ var urlParams;
        urlParams[decode(match[1])] = decode(match[2]);
 })();
 
-const Line = ({text, state}) => {
+const ActionLink = React.memo(({text, callback}) => {
+  let onClick = React.useCallback(e => {
+    e.preventDefault()
+    callback(text)
+  }, [text, callback])
+
+  return <a onClick={onClick}>{text}</a>
+})
+
+const Line = ({lineKey, line, state, actions}) => {
   const ref = React.useRef()
 
   React.useLayoutEffect(x => {
@@ -44,13 +53,25 @@ const Line = ({text, state}) => {
     }
   }, [state])
 
-  return <div className={'line ' + state } ref={ref}>
-    <div className="content">{text}</div>
+  let onAction = React.useCallback((a) => {
+    alert(`action ${a} on ${lineKey}`)
+  }, [lineKey])
+
+  let actionLinks = []
+  for (let a of actions) {
+    actionLinks.push(<ActionLink key={a} text={a} callback={onAction}></ActionLink>)
+  }
+
+  return <div className={'line ' + state} ref={ref}>
+    <div className="content">{line.text}</div>
+    <div className="actions">{actionLinks}</div>
   </div>
 }
 
-const Page = ({lines, order, at}) => {
-  function renderLines(lines, order, at) {
+const Page = ({lines, order, at, actions}) => {
+  actions = actions || []
+
+  function renderLines(lines, order, at, actions) {
     let out = []
     let state = "done"
     for (let ref of order) {
@@ -60,13 +81,12 @@ const Page = ({lines, order, at}) => {
         state = "todo"
       }
       let line = lines[ref]
-      let l = line.text
-      out.push(<Line key={ref} text={l} state={state} />)
+      out.push(<Line key={ref} lineKey={ref} line={line} state={state} actions={actions} />)
     }
     return out
   }
 
-  return <div className="lines">{renderLines(lines, order, at)}</div>
+  return <div className="lines">{renderLines(lines, order, at, actions)}</div>
 }
 
 const MyTitle = React.memo(({text}) => {
@@ -148,10 +168,12 @@ const AsUserScreen = ({sync}) => {
     })
   }, [])
 
+  let actions = [ '?', '✓' ]
+
   return <div className="app asuser">
     <div className="main">
       <header className="title"><MyTitle text={state.title} /></header>
-      <Page lines={state.lines} order={state.order} at={state.at} />
+      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} />
       <StatusLine sync={sync}/>
     </div>
   </div>
@@ -213,10 +235,12 @@ const AsHostScreen = ({sync}) => {
     return () => document.removeEventListener('keypress', f)
   }, [next])
 
+  let actions = [ '!', '+' ]
+
   return <div className="app ashost">
     <div className="main">
       <header className="title"><MyTitle text={state.title} /></header>
-      <Page lines={state.lines} order={state.order} at={state.at} />
+      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} />
       <TransportControls back={backAt && back} next={nextAt && next} />
     </div>
     <div className="side">
