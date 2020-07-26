@@ -2,20 +2,23 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io/ioutil"
-	"strings"
 )
 
-type line struct {
-	// ID string `json:"text"`
+type lineDef struct {
 	Text string `json:"text"`
 }
 
-type lessonFile struct {
+type lessonDef struct {
 	Title string    `json:"title"`
-	Lines []line    `json:"lines"`
+	Lines []lineDef `json:"lines"`
 	Users []UserDef `json:"users"`
+}
+
+type line struct {
+	// ID string `json:"text"`
+	Text  string          `json:"text"`
+	Users map[string]bool `json:"users"`
 }
 
 type lessonData struct {
@@ -25,20 +28,21 @@ type lessonData struct {
 	At    string          `json:"at"`
 }
 
-func newLesson(users []UserDef, title string, lines []line) *Sync {
+func newLesson(users []UserDef, title string, lines []lineDef) *Sync {
 	lineMap := map[string]line{}
 	order := make([]string, len(lines))
 	for i, l := range lines {
 		id := randSeq(5)
-		lineMap[id] = l
+		lineMap[id] = line{Text: l.Text}
 		order[i] = id
 	}
-	s := newSync(users, &lessonData{
+	data, _ := json.Marshal(&lessonData{
 		Title: title,
 		Lines: lineMap,
 		Order: order,
 		At:    order[0],
 	})
+	s := newSync(users, data)
 	return s
 }
 
@@ -48,7 +52,7 @@ func loadLesson(filename string) (*Sync, error) {
 		return nil, err
 	}
 
-	file := lessonFile{}
+	file := lessonDef{}
 	err = json.Unmarshal(data, &file)
 	if err != nil {
 		return nil, err
@@ -57,50 +61,4 @@ func loadLesson(filename string) (*Sync, error) {
 	l := newLesson(file.Users, file.Title, file.Lines)
 
 	return l, nil
-}
-
-func (l *lessonData) MarshalJSONPart(path string) ([]byte, error) {
-	switch {
-	case path == "at":
-		return json.Marshal(l.At)
-	case path == "order":
-		return json.Marshal(l.Order)
-	case path == "lines":
-		return json.Marshal(l.Lines)
-	}
-	return nil, errors.New("bad path")
-}
-
-func (l *lessonData) Update(path string, data json.RawMessage) (string, error) {
-	switch {
-	case path == "at":
-		val := ""
-		err := json.Unmarshal(data, &val)
-		if err != nil {
-			return "", err
-		}
-		// XXX - could be invalid ref
-		l.At = val
-		return "at", nil
-	case path == "order":
-		val := []string{}
-		err := json.Unmarshal(data, &val)
-		if err != nil {
-			return "", err
-		}
-		// XXX - could have invalid line refs
-		l.Order = val
-		return "order", nil
-	case strings.HasPrefix(path, "lines/"):
-		lpath := path[6:]
-		val := line{}
-		err := json.Unmarshal(data, &val)
-		if err != nil {
-			return "", err
-		}
-		// XXX - could cause invalid line refs
-		l.Lines[lpath] = val
-		return "lines", nil
-	}
-	return "", errors.New("bad path")
 }

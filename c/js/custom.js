@@ -35,16 +35,16 @@ var urlParams;
        urlParams[decode(match[1])] = decode(match[2]);
 })();
 
-const ActionLink = React.memo(({text, callback}) => {
+const ActionLink = React.memo(({label, tip, callback}) => {
   let onClick = React.useCallback(e => {
     e.preventDefault()
-    callback(text)
-  }, [text, callback])
+    callback(label)
+  }, [label, callback])
 
-  return <a onClick={onClick}>{text}</a>
+  return <a onClick={onClick} title={tip}>{label}</a>
 })
 
-const Line = ({lineKey, line, state, actions}) => {
+const Line = ({lineKey, line, state, actions, onAction}) => {
   const ref = React.useRef()
 
   React.useLayoutEffect(x => {
@@ -53,13 +53,13 @@ const Line = ({lineKey, line, state, actions}) => {
     }
   }, [state])
 
-  let onAction = React.useCallback((a) => {
-    alert(`action ${a} on ${lineKey}`)
-  }, [lineKey])
+  let onAction2 = React.useCallback((action) => {
+    onAction(lineKey, action)
+  }, [lineKey, onAction])
 
   let actionLinks = []
   for (let a of actions) {
-    actionLinks.push(<ActionLink key={a} text={a} callback={onAction}></ActionLink>)
+    actionLinks.push(<ActionLink key={a.label} label={a.label} tip={a.tip} callback={onAction2}></ActionLink>)
   }
 
   return <div className={'line ' + state} ref={ref}>
@@ -68,7 +68,7 @@ const Line = ({lineKey, line, state, actions}) => {
   </div>
 }
 
-const Page = ({lines, order, at, actions}) => {
+const Page = ({lines, order, at, actions, onAction}) => {
   actions = actions || []
 
   function renderLines(lines, order, at, actions) {
@@ -81,7 +81,7 @@ const Page = ({lines, order, at, actions}) => {
         state = "todo"
       }
       let line = lines[ref]
-      out.push(<Line key={ref} lineKey={ref} line={line} state={state} actions={actions} />)
+      out.push(<Line key={ref} lineKey={ref} line={line} state={state} actions={actions} onAction={onAction} />)
     }
     return out
   }
@@ -94,8 +94,9 @@ const MyTitle = React.memo(({text}) => {
 })
 
 function getUsers(sync) {
-  let raw = sync.get('users') || []
-  let list = [...raw].sort((a, b) => a.name > b.name)
+  let raw = sync.get('users') || {}
+  let list = Object.keys(raw).map(e => raw[e])
+  list.sort((a, b) => a.name > b.name)
   return list
 }
 
@@ -113,7 +114,7 @@ const UsersList = ({sync}) => {
     <header>users</header>
     <div>
       <ul>
-        {list.map(e => <li key={e.id}>{e.id} ({e.online ? "online" : "offline"})</li>)}
+        {list.map(e => <li key={e.name}>{e.name} ({e.online ? "online" : "offline"})</li>)}
       </ul>
     </div>
   </aside>
@@ -135,7 +136,7 @@ const StatusDisplay = ({sync}) => {
   </aside>
 }
 
-const StatusLine = ({sync}) => {
+const StatusLine = ({user, sync}) => {
   const [online, setOnline] = React.useState(sync.isOnline())
 
   React.useEffect(() => {
@@ -146,7 +147,7 @@ const StatusLine = ({sync}) => {
   }, [])
 
   return <aside className="statusline">
-    <div>{online ? "online" : "offline"}</div>
+    <div>{user} - {online ? "online" : "offline"}</div>
   </aside>
 }
 
@@ -154,7 +155,10 @@ const PreAppScreen = ({text}) => {
   return <h1>... {text} ...</h1>
 }
 
-const AsUserScreen = ({sync}) => {
+const AsUserScreen = ({app}) => {
+  let user = app.user
+  let sync = app.sync
+
   const [state, update] = React.useReducer(
     (s, a) => ({ ...s, ...a }),
     { title: 'loading', lines: {}, order: [], at: '' })
@@ -168,13 +172,29 @@ const AsUserScreen = ({sync}) => {
     })
   }, [])
 
-  let actions = [ '?', '✓' ]
+  let actions = [{
+    label: '?',
+    tip: 'if you have a question about this line'
+  }, {
+    label: '✓',
+    tip: 'another button'
+  }]
+  let actionCb = React.useCallback((line, action) => {
+    switchy(action, {
+      '?': () => {
+        sync.set(`data/lines/{user}`, true)
+      },
+      '✓': () => {
+        alert('what should this do?')
+      }
+    })
+  }, [])
 
   return <div className="app asuser">
     <div className="main">
       <header className="title"><MyTitle text={state.title} /></header>
-      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} />
-      <StatusLine sync={sync}/>
+      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} onAction={actionCb} />
+      <StatusLine user={user} sync={sync}/>
     </div>
   </div>
 }
@@ -186,7 +206,9 @@ const TransportControls = React.memo(({back, next}) => {
   </div>
 })
 
-const AsHostScreen = ({sync}) => {
+const AsHostScreen = ({app}) => {
+  let sync = app.sync
+
   const [state, signal] = React.useReducer((s, a) => {
     return switchy(a.is, {
       'move': () => {
@@ -212,8 +234,9 @@ const AsHostScreen = ({sync}) => {
     })
   }, [])
 
-  let backAt = state.order[state.order.indexOf(state.at)-1]
-  let nextAt = state.order[state.order.indexOf(state.at)+1]
+  let atIdx = state.order.indexOf(state.at)
+  let backAt = state.order[atIdx-1]
+  let nextAt = state.order[atIdx+1]
 
   let back = React.useCallback((e) => {
     e.preventDefault()
@@ -235,12 +258,28 @@ const AsHostScreen = ({sync}) => {
     return () => document.removeEventListener('keypress', f)
   }, [next])
 
-  let actions = [ '!', '+' ]
+  let actions = [{
+    label: '!',
+    tip: 'focus this line'
+  }, {
+    label: '+',
+    tip: 'add a line'
+  }]
+  let actionCb = React.useCallback((line, action) => {
+    switchy(action, {
+      '!': () => {
+        signal({ is: 'move', at: line })
+      },
+      [other]: () => {
+        alert(`action ${action} on ${line}`)
+      }
+    })
+  }, [])
 
   return <div className="app ashost">
     <div className="main">
       <header className="title"><MyTitle text={state.title} /></header>
-      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} />
+      <Page lines={state.lines} order={state.order} at={state.at} actions={actions} onAction={actionCb} />
       <TransportControls back={backAt && back} next={nextAt && next} />
     </div>
     <div className="side">
@@ -250,132 +289,10 @@ const AsHostScreen = ({sync}) => {
   </div>
 }
 
-class Sync {
-  constructor(loginResponse) {
-    this.token = loginResponse.token
-    this.host = loginResponse.host
-    this.online = false
-
-    this.version = 0
-    this.users = []
-    this.data = {}
-
-    this.watchers = []
-  }
-  start(dataResponse) {
-    this.version = dataResponse.version
-    this.users = dataResponse.users
-    this.data = dataResponse.data
-
-    this._notify('users')
-    for (let k in this.data) {
-      this._notify(`data/${k}`)
-    }
-
-    let url = `ws://${document.location.host}/s/sync?token=${this.token}&from=${this.version}`
-    let ws = new WebSocket(url)
-    ws.onopen = (evt) => {
-      this.online = true
-      this._notify('online')
-    }
-    ws.onclose = (evt) => {
-      this.online = false
-      this._notify('online')
-      this.ws = null
-    }
-    ws.onmessage = (evt) => {
-      let m = JSON.parse(evt.data)
-      switchy(m.type, {
-        's': () => {
-          alert('message: ' + m.message)
-        },
-        'u': () => {
-          this._update(m.version, m.path, m.data)
-        },
-        [other]: () => {
-          console.log('message? ' + m)
-        }
-      })
-    }
-    ws.onerror = (evt) => {
-      console.log('sync error: ' + evt.data)
-    }
-    this.ws = ws
-  }
-  _update(version, path, value) {
-    console.log('update arrived', version, path)
-    this.version = version
-    if (path == 'users') {
-      this.users = value
-    } else if (path.startsWith('data/')) {
-      let dpath = path.substring(5)
-      // XXX - actually follow path
-      this.data[dpath] = value
-    }
-    this._notify(path)
-  }
-  isOnline() {
-    return this.online
-  }
-  isHost() {
-    return this.host
-  }
-  get(path) {
-    if (path == 'users') {
-      return this.users
-    } else if (path.startsWith('data/')) {
-      let dpath = path.substring(5)
-      return this.data[dpath]
-    }
-    return null
-  }
-  set(path, value) {
-    let data = JSON.stringify({
-      type: 'u',
-      path: path,
-      value: value
-    })
-    this.ws.send(data)
-  }
-  watch(path, callback) {
-    this.watchers.push({ path, callback })
-    return () => this.unwatch(path, callback)
-  }
-  multiwatch(watches) {
-    let stops = []
-    for (let p in watches) {
-      this.watch(p, watches[p])
-    }
-    return () => stops.forEach(e => e())
-  }
-  unwatch(path, callback) {
-    let n = this.watchers.find(e => e.path == path && e.callback == callback)
-    if (n >= 0) {
-      this.watchers.splice(n, n)
-    }
-  }
-  _notify(path) {
-    setTimeout(() => {
-      // console.log('notify?', path)
-      for (let watcher of this.watchers) {
-        if (path.startsWith(watcher.path)) {
-          // console.log('yes!', watcher.path)
-          try {
-            watcher.callback(path)
-          } catch (e) {
-            console.log('notify error!', e)
-          }
-        } else {
-          // console.log('no!', watcher.path)
-        }
-      }
-    }, 0)
-  }
-}
-
 class App {
   constructor() {
     this.auth = urlParams.auth
+    this.user = null
     this.token = null
     this.sync = null
   }
@@ -391,19 +308,20 @@ class App {
   _onLogin(loginResponse) {
     ReactDOM.render(React.createElement(PreAppScreen, { text: 'fetching data' }), document.querySelector('#app'))
 
+    this.user = loginResponse.name
     this.token = loginResponse.token
     this.sync = new Sync(loginResponse)
 
-    fetch('/s/data?token=' + this.token)
+    fetch(`/s/events?token=${this.token}&from=${0}`)
       .then(response => response.json())
       .then(r => this._onData(r))
   }
 
   _onData(dataResponse) {
     if (this.sync.isHost()) {
-      ReactDOM.render(React.createElement(AsHostScreen, { sync: this.sync }), document.querySelector('#app'))
+      ReactDOM.render(React.createElement(AsHostScreen, { app: this }), document.querySelector('#app'))
     } else {
-      ReactDOM.render(React.createElement(AsUserScreen, { sync: this.sync }), document.querySelector('#app'))
+      ReactDOM.render(React.createElement(AsUserScreen, { app: this }), document.querySelector('#app'))
     }
     this.sync.start(dataResponse)
   }

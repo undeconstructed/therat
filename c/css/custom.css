@@ -70,12 +70,18 @@ body {
         justify-content: center;
         align-items: center;
       }
+        .line .actions a {
+          cursor: pointer;
+        }
     .transport {
       background: white;
       display: flex;
       justify-content: center;
       align-items: center;
     }
+      .transport a {
+        cursor: pointer;
+      }
       .transport a.disabled {
         color: gray;
         cursor: default;

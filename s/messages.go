@@ -5,6 +5,7 @@ import "encoding/json"
 // UserDef is for inputting users
 type UserDef struct {
 	Name string `json:"name"`
+	Role string `json:"role"`
 }
 
 type clientMessage struct {

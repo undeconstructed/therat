@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -21,7 +22,7 @@ var upgrader = websocket.Upgrader{} // use default options
 type JSONLoginResponse struct {
 	Token string `json:"token"`
 	Name  string `json:"name"`
-	Host  bool   `json:"host"`
+	Role  string `json:"role"`
 }
 
 func main() {
@@ -36,8 +37,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	state, _ := l.MarshalJSON()
-	log.Printf("state: %s", state)
+	// state, _ := l.MarshalJSON()
+	// log.Printf("state: %s", state)
 
 	go l.Run()
 
@@ -67,11 +68,11 @@ func main() {
 		}
 
 		w.WriteHeader(200)
-		j, _ := json.Marshal(JSONLoginResponse{res.token, res.name, res.host})
+		j, _ := json.Marshal(JSONLoginResponse{res.token, res.name, res.role})
 		w.Write(j)
 	})
 
-	http.HandleFunc("/s/data", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/s/state", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		t := q.Get("token")
 		if t == "" {
@@ -83,8 +84,8 @@ func main() {
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(200)
 
-		b, _ := l.MarshalJSON()
-		w.Write(b)
+		// b, _ := l.MarshalJSON()
+		// w.Write()
 	})
 
 	http.HandleFunc("/s/events", func(w http.ResponseWriter, r *http.Request) {
@@ -94,9 +95,20 @@ func main() {
 			w.WriteHeader(401)
 			return
 		}
+		f := q.Get("from")
+		fn, err := strconv.Atoi(f)
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		b, _ := l.MarshalEventsJSON(fn)
+		if err != nil {
+			w.WriteHeader(500)
+			return
+		}
 
 		w.WriteHeader(200)
-		w.Write([]byte("s"))
+		w.Write(b)
 	})
 
 	http.HandleFunc("/s/sync", func(w http.ResponseWriter, r *http.Request) {

@@ -9,12 +9,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// SyncData allows the data in the Sync to be handled by something else
-type SyncData interface {
-	Update(path string, data json.RawMessage) (string, error)
-	MarshalJSONPart(path string) ([]byte, error)
-}
-
 type loginRequest struct {
 	auth string
 	res  chan loginResponse
@@ -23,7 +17,7 @@ type loginRequest struct {
 type loginResponse struct {
 	token string
 	name  string
-	host  bool
+	role  string
 	err   error
 }
 
@@ -48,25 +42,14 @@ type updateRequest struct {
 }
 
 type user struct {
-	Name   string
+	Name   string `json:"name"`
+	Role   string `json:"role"`
 	client *client
-}
-
-func (u *user) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Online bool   `json:"online"`
-	}{
-		u.Name, u.Name, u.client != nil,
-	})
 }
 
 // Sync handles data sync between some users
 type Sync struct {
-	version int
-	// TODO generic data
-	data SyncData
+	data *tracker
 
 	updatesIn  chan updateRequest
 	updatesOut chan updateMessage
@@ -74,20 +57,25 @@ type Sync struct {
 	logins      chan loginRequest
 	connects    chan connectRequest
 	disconnects chan disconnectRequest
-	users       []*user
+	users       map[string]*user
 }
 
-func newSync(users []UserDef, data SyncData) *Sync {
-	users1 := []*user{}
+func newSync(users []UserDef, data0 json.RawMessage) *Sync {
+	users1 := map[string]*user{}
 	for _, u := range users {
 		u1 := &user{
 			Name: u.Name,
+			Role: u.Role,
 		}
-		users1 = append(users1, u1)
+		users1[u1.Name] = u1
 	}
 
+	data := newTracker()
+	usersJSON, _ := json.Marshal(users1)
+	data.addChange("users", usersJSON)
+	data.addChange("data", data0)
+
 	return &Sync{
-		version:     0,
 		users:       users1,
 		data:        data,
 		updatesIn:   make(chan updateRequest, 100),
@@ -98,18 +86,24 @@ func newSync(users []UserDef, data SyncData) *Sync {
 	}
 }
 
-// MarshalJSON encodes all sync data to JSON
-func (s *Sync) MarshalJSON() ([]byte, error) {
-	dataJSON, err := json.Marshal(s.data)
+// MarshalStateJSON encodes all sync data to JSON
+func (s *Sync) MarshalStateJSON() ([]byte, error) {
+	// TODO tracker snapshot
+	return nil, nil
+}
+
+// MarshalEventsJSON encodes all sync data to JSON
+func (s *Sync) MarshalEventsJSON(from int) ([]byte, error) {
+	changes, err := s.data.getChanges(from)
 	if err != nil {
 		return nil, err
 	}
-
-	return json.Marshal(struct {
-		Version int             `json:"version"`
-		Users   []*user         `json:"users"`
-		Data    json.RawMessage `json:"data"`
-	}{s.version, s.users, dataJSON})
+	changes1 := make([]updateMessage, len(changes))
+	for i, c := range changes {
+		j, _ := json.Marshal(c.data)
+		changes1[i] = updateMessage{Version: c.version, Path: c.path, Data: j}
+	}
+	return json.Marshal(changes1)
 }
 
 // Run is the main loop for the Sync
@@ -138,17 +132,18 @@ func (s *Sync) Update(path string, data json.RawMessage) {
 }
 
 func (s *Sync) doUpdate(path string, data json.RawMessage) {
-	if strings.HasPrefix(path, "data/") {
-		dpath := path[5:]
-		cpath, err := s.data.Update(dpath, data)
-		if err != nil {
-			log.Printf("data rejected: %v", err)
-			return
-		}
-		s.version++
-		jn, _ := s.data.MarshalJSONPart(cpath)
-		s.updatesOut <- updateMessage{s.version, "data/" + cpath, jn}
+	if !strings.HasPrefix(path, "data/") {
+		// externals can only update inside data
+		return
 	}
+
+	version, err := s.data.addChange(path, data)
+	if err != nil {
+		log.Printf("data rejected: %v", err)
+		return
+	}
+
+	s.updatesOut <- updateMessage{version, path, data}
 }
 
 func (s *Sync) sendUpdates(m updateMessage) {
@@ -178,12 +173,12 @@ func (s *Sync) doLogin(auth string) loginResponse {
 			// XXX - token shouldn't be name maybe
 			token := u.Name
 			name := u.Name
-			host := u.Name == "host"
-			return loginResponse{token, name, host, nil}
+			role := u.Role
+			return loginResponse{token, name, role, nil}
 		}
 	}
 
-	return loginResponse{"", "", false, errors.New("no user")}
+	return loginResponse{err: errors.New("no user")}
 }
 
 // Connect allows a websocket to connect to the Sync. Run the returned func in the web handler.
@@ -205,12 +200,12 @@ func (s *Sync) doConnect(token string, conn *websocket.Conn) connectResponse {
 			log.Printf("client connecting: %s", u.Name)
 			u.client = newClient(s, u, conn)
 
-			s.version++
-			jn, _ := json.Marshal(s.users)
+			path := "users/" + u.Name + "/online"
+			version, _ := s.data.addChange(path, json.RawMessage("true"))
 			s.updatesOut <- updateMessage{
-				Version: s.version,
-				Path:    "users",
-				Data:    jn,
+				Version: version,
+				Path:    path,
+				Data:    json.RawMessage("true"),
 			}
 
 			return connectResponse{func() { u.client.run() }, nil}
@@ -231,12 +226,12 @@ func (s *Sync) doDisconnect(client *client) {
 		if u.client == client {
 			u.client = nil
 
-			s.version++
-			jn, _ := json.Marshal(s.users)
+			path := "users/" + u.Name + "/online"
+			version, _ := s.data.addChange(path, json.RawMessage("false"))
 			s.updatesOut <- updateMessage{
-				Version: s.version,
-				Path:    "users",
-				Data:    jn,
+				Version: version,
+				Path:    path,
+				Data:    json.RawMessage("false"),
 			}
 		}
 	}

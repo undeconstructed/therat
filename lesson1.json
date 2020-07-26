@@ -10,7 +10,8 @@
     "text": "the fourth line"
   }],
   "users": [{
-    "name": "host"
+    "name": "host",
+    "role": "host"
   }, {
     "name": "user"
   }, {
